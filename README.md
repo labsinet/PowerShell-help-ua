@@ -6431,187 +6431,7 @@ state: present
 	# source: URL-адреса внутрішнього репозиторію
 source: https://community.chocolatey.org/api/v2/ChocolateyInstall.ps1
 ````
-# GigaChat
 
-### 1. Встановлення сертифікатів:
-
-`Invoke-WebRequest "https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt" -OutFile "$home\Downloads\russian_trusted_root_ca.cer"` скачати сертифікат мінцифри \
-`Invoke-WebRequest "https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt" -OutFile "$home\Downloads\russian_trusted_sub_ca.cer"` \
-`Import-Certificate -FilePath "$home\Downloads\russian_trusted_root_ca.cer" -CertStoreLocation "Cert:\CurrentUser\Root"` встановити сертифікат мінцифри \
-`Import-Certificate -FilePath "$home\Downloads\russian_trusted_sub_ca.cer" -CertStoreLocation "Cert:\CurrentUser\CA"`
-
-### 2. Авторизація по Sber ID та генерація нових авторизаційних даних для отримання токена: https://developers.sber.ru/studio (час життя 30 хвилин)
-
-### 3. Формування авторизаційних даних у форматі Base64 з Client ID та Client Secret:
-```PowerShell
-$Client_ID = "7e6d2f9f-825e-49b7-98f4-62fbb7506427" # [System.Guid]::Parse("7e6d2f9f-825e-49b7-98f4-62fbb7506427")
-$Client_Secret = "c35113ee-6757-47ba-9853-ea1d0d9db1ef" # [System.Guid]::Parse("c35113ee-6757-47ba-9853-ea1d0d9db1ef")
-$Client_Join = $Client_ID+":"+$Client_Secret # об'єднуємо два UUID в один рядок, розділяючи їх символом ':'
-$Bytes = [System.Text.Encoding]::UTF8.GetBytes($Client_Join) # перетворюємо рядок на масив байт
-$Cred_Base64 = [Convert]::ToBase64String($Bytes) # кодуємо байти у рядок Base64
-````
-### 4. Отримання токена:
-
-`$Cred_Base64 = "N2U2ZDJmOWYtODI1ZS00OWI3LTk4ZjQtNjJmYmI3NTA2NDI3OmIyYzgwZmZmLTEzOGUtNDg1Mi05MjgwLWE2MGI4NTc0YTM2MQ
-`$UUID = [System.Guid]::NewGuid()` генеруємо UUID для журналування вхідних дзвінків та розбору інцидентів
-```PowerShell
-$url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
-$headers = @{
-"Authorization" = "Basic $Cred_Base64"
-"RqUID" = "$UUID"
-"Content-Type" = "application/x-www-form-urlencoded"
-}
-$body = @{
-scope = "GIGACHAT_API_PERS"
-}
-$GIGA_TOKEN = $(Invoke-RestMethod -Uri $url -Method POST -Headers $headers -Body $body).access_token
-````
-### 5. Параметри:
-```PowerShell
-[string]$content = "Порахуй суму чисел: 22+33"
-[string]$role = "user" # роль автора повідомлення (user/assistant/system)
-[float]$temperature = 0.7 # температура вибірки в діапазоні від 0 до 2. Чим вище значення, тим більш випадковою буде відповідь моделі.
-[float]$top_p = 0.1 # використовується як альтернатива temperature і змінюється в діапазоні від 0 до 1. Задає ймовірнісну масу токенів, які повинна враховувати модель. Так, якщо передати значення 0.1, модель враховуватиме лише токени, чия ймовірна маса входить у верхні 10%.
-[int64]$n = 1 # кількість варіантів відповідей (1..4), які потрібно згенерувати для кожного вхідного повідомлення
-[int64]$max_tokens = 512 # максимальна кількість токенів, які будуть використані для створення відповідей
-[boolean]$stream = $false # надсилати повідомлення частинами потоку
-````
-### 6. Складання запитів:
-```PowerShell
-$url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
-$headers = @{
-"Authorization" = "Bearer $GIGA_TOKEN"
-"Content-Type" = "application/json"
-}
-
-$(Invoke-RestMethod -Uri "https://gigachat.devices.sberbank.ru/api/v1/models" -Headers $headers).data # список доступних моделей
-
-$body = @{
-model = "GigaChat:latest"
-messages = @(
-@{
-role = $role
-content = $content
-}
-)
-temperature = $temperature
-	n = $n
-	max_tokens = $max_tokens
-	stream = $stream
-} | ConvertTo-Json
-$Request = Invoke-RestMethod -Method POST -Uri $url -Headers $headers -Body $body
-$Request.choices.message.content
-````
-## Curl
-
-### Встановлення сертифікатів в Ubuntu:
-
-`wget https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt` \
-`wget https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt` \
-`mkdir /usr/local/share/ca-certificates/russian_trusted` \
-`cp russian_trusted_root_ca_pem.crt russian_trusted_sub_ca_pem.crt /usr/local/share/ca-certificates/russian_trusted` \
-`update-ca-certificates -v` \
-`wget -qS --spider --max-redirect=0 https://www.sberbank.ru`
-
-### Отримання токена:
-``` Bash
-Cred_Base64="N2U2ZDJmOWYtODI1ZS00OWI3LTk4ZjQtNjJmYmI3NTA2NDI3OmIyYzgwZmZmLTEzOGUtNDg1Mi05MjgwLWE2MGI4NTc0YTM2MQ=
-UUID=$(uuidgen)
-GIGA_TOKEN=$(curl -s --location --request POST "https://ngw.devices.sberbank.ru:9443/api/v2/oauth" \
---header "Authorization: Basic $Cred_Base64" \
---header "RqUID: $UUID" \
---header "Content-Type: application/x-www-form-urlencoded" \
---data-urlencode 'scope=GIGACHAT_API_PERS' | jq -r .access_token)
-````
-`curl -s --location "https://gigachat.devices.sberbank.ru/api/v1/models" --header "Authorization: Bearer $GIGA_TOKEN" | jq.` для перевірки
-
-### Складання запиту:
-``` Bash
-request=$(curl -s https://gigachat.devices.sberbank.ru/api/v1/chat/completions \
--H "Content-Type: application/json" \
--H "Authorization: Bearer $GIGA_TOKEN" \
--d' {
-"model": "GigaChat:latest",
-"messages": [
-{
-"role": "user",
-"content": "Коли вже ІІ захопить цей світ?"
-}
-],
-"temperature": 0.7
-}')
-echo $request | jq -r .choices[].message.content
-````
-# YandexGPT
-
-## Отримати OAuth-Token:
-
-https://cloud.yandex.ru/ru/docs/iam/operations/iam-token/create час життя IAM-токена не більше 12 годин \
-`yandexPassportOauthToken="y0_AgAAAAAGaLFLAATuwQAAAAD3xtRLQE4hvlazQ5euKO43XXXXXXXXXXX"` для bash \
-`$yandexPassportOauthToken = "y0_AgAAAAAGaLFLAATuwQAAAAD3xtRLQE4hvlazQ5euKO43XXXXXXXXXXX"` для PowerShell
-
-## Обмінювати OAuth-Token на IAM-Token:
-
-`IAM_TOKEN=$(curl -s -d "{\"yandexPassportOauthToken\":\"$yandexPassportOauthToken\"}" "https://iam.api.cloud.yandex.net/iam/v1/tokens" | jq - r .iamToken)` \
-`$IAM_TOKEN = $(Invoke-RestMethod -Method POST -Uri "https://iam.api.cloud.yandex.net/iam/v1/tokens" -Body $(@{yandexPassportOauthToken = "$yandexPassportOauthToken"} | Convert -Json -Compress)).iamToken`
-
-## Отримати FOLDER_ID:
-``` Bash
-CLOUD_ID=$(curl -s -H "Authorization: Bearer $IAM_TOKEN" https://resource-manager.api.cloud.yandex.net/resource-manager/v1/clouds | jq -r .clouds[].id) # отримати cloud id
-curl -s --request GET -H "Authorization: Bearer $IAM_TOKEN" https://resource-manager.api.cloud.yandex.net/resource-manager/v1/folders -d "{\"cloudId\": \ "$CLOUD_ID\"}" # отримати список директорій у хмарі
-curl -s --request POST -H "Authorization: Bearer $IAM_TOKEN" https://resource-manager.api.cloud.yandex.net/resource-manager/v1/folders -d "{\"cloudId\": \ "$CLOUD_ID\", \"name\": \"test\"}" # створити директорію в хмарі
-FOLDER_ID=$(curl -s --request GET -H "Authorization: Bearer $IAM_TOKEN" https://resource-manager.api.cloud.yandex.net/resource-manager/v1/folders -d '{"cloudId" : "b1gf9n6heihqj0pt5piu"}' | jq -r '.folders[] | select(.name == "test") | .id') # забрати id директорії
-````
-```PowerShell
-$CLOUD_ID = $(Invoke-RestMethod -Method Get -Uri "https://resource-manager.api.cloud.yandex.net/resource-manager/v1/clouds" -Headers @{"Authorization"="Bearer $IAM_TOKEN "; "Content-Type"="application/json"}).clouds.id
-$FOLDER_ID = $(Invoke-RestMethod -Method Get -Uri "https://resource-manager.api.cloud.yandex.net/resource-manager/v1/folders" -Headers @{"Authorization"="Bearer $IAM_TOKEN "; "Content-Type"="application/json"} -Body (@{"cloudId"=$CLOUD_ID} | ConvertTo-Json)).folders | Where-Object name -eq test | Select-Object -ExpandProperty id
-````
-### Складання запиту:
-``` Bash
-model="gpt://$FOLDER_ID/yandexgpt/latest" # https://cloud.yandex.ru/ru/docs/yandexgpt/concepts/models
-body=$(cat <<EOF
-{
-"modelUri": "$model",
-"completionOptions": {
-"stream": false,
-"temperature": 0.6,
-"maxTokens": 2000
-},
-"messages": [
-{
-"role": "user",
-"text": "Порахуй суму 22+33"
-}
-]
-}
-EOF)
-curl --request POST \
--H "Content-Type: application/json" \
--H "Authorization: Bearer $IAM_TOKEN" \
--H "x-folder-id: $FOLDER_ID" \
--d "$body" \
-"https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
-````
-```PowerShell
-$model = "gpt://$FOLDER_ID/yandexgpt/latest"
-$body = @"
-{
-"modelUri": "$model",
-"completionOptions": {
-"stream": false,
-"temperature": 0.6,
-"maxTokens": 2000
-},
-"messages": [
-{
-"role": "user",
-"text": "Порахуй суму 22+33"
-}
-]
-}
-"@
-Invoke-RestMethod -Method POST -Uri "https://llm.api.cloud.yandex.net/foundationModels/v1/completion" -Headers @{"Content-Type"="application/json"; "Authorization"="Bearer $IAM_TOKEN"; "x-folder-id"="$FOLDER_ID"} -Body $body
-````
 # SuperAGI
 
 https://github.com/TransformerOptimus/SuperAGI \
@@ -6733,14 +6553,14 @@ $response.items | Select-Object title,snippet,displayLink,link | Format-List
 ````
 # RapidAPI
 
-https://rapidapi.com/ru/neoscrap-net/api/google-search72
+https://rapidapi.com/neoscrap-net/api/google-search72
 ```PowerShell
 $Key = "<TOKEN_API>"
 $headers=@{}
 $headers.Add("X-RapidAPI-Key", "$Key")
 $headers.Add("X-RapidAPI-Host", "google-search72.p.rapidapi.com")
 $query = "як створити бота discord"
-$response = Invoke-RestMethod "https://google-search72.p.rapidapi.com/search?q=$query%20gitgub&gl=us&lr=lang_ru&num=20&start=0" -Method GET -Headers $headers
+$response = Invoke-RestMethod "https://google-search72.p.rapidapi.com/search?q=$query%20gitgub&gl=us&num=20&start=0" -Method GET -Headers $headers
 $response.items | Select-Object title,snippet,displayLink,link | Format-List
 ````
 ### IMDb
@@ -6788,20 +6608,6 @@ $(Invoke-RestMethod -Uri $url -Method Get) # список сезонів (.seaso
 (Invoke-RestMethod -Uri "https://api.themoviedb.org/3/tv/$id/season/2?api_key=$Token" -Method Get).episodes # вивести 2 сезон
 Invoke-RestMethod -Uri "https://api.themoviedb.org/3/tv/$id/season/2/episode/8?api_key=$Token" -Method Get # вивести 8 епізод
 ````
-# ivi
-
-https://ask.ivi.ru/knowledge-bases/10/articles/51697-dokumentatsiya-dlya-api-ivi
-
-`Invoke-RestMethod https://api.ivi.ru/mobileapi/categories` список категорій та жанрів (genres/meta_genres) \
-`Invoke-RestMethod https://api.ivi.ru/mobileapi/collections` вибірки
-
-`(Invoke-RestMethod "https://api.ivi.ru/mobileapi/search/v7/?query=zimorodok").result.seasons.number` у сезонів \
-`(Invoke-RestMethod "https://api.ivi.ru/mobileapi/search/v7/?query=zimorodok").result.seasons[1].episode_count` у серій у другому сезоні \
-`(Invoke-RestMethod "https://api.ivi.ru/mobileapi/search/v7/?query=zimorodok").result.seasons[1].ivi_release_info.date_interval_min` дата виходу наступної серії \
-`(Invoke-RestMethod "https://api.ivi.ru/mobileapi/search/v7/?query=zimorodok").result.kp_rating` рейтинг у Кінопошук (8.04)
-
-`$id = (Invoke-RestMethod "https://api.ivi.ru/mobileapi/search/v7/?query=zimorodok").result.kp_id` отримати id до Кінопошуку (5106881) \
-`id=$(curl -s https://api.ivi.ru/mobileapi/search/v7/?query=zimorodok | jq .result[].kp_id)` отримати id до Кінопошуку
 
 # Kinopoisk
 ``` Bash
